@@ -202,8 +202,16 @@ class AudioPlayerService {
   Duration get position => _audioHandler?.player.position ?? Duration.zero;
   Duration? get duration => _audioHandler?.player.duration;
 
-  void setPlaylist(List<Surah> surahs) {
+  void setPlaylist(List<Surah> surahs, {bool updateCurrentIndex = true}) {
     _playlist = surahs;
+
+    // Update currentIndex to match current surah position in new playlist
+    if (updateCurrentIndex && _currentSurah != null) {
+      final newIndex = _playlist.indexWhere((s) => s.id == _currentSurah!.id);
+      if (newIndex != -1) {
+        _currentIndex = newIndex;
+      }
+    }
   }
 
   Future<void> loadAndPlay(Surah surah) async {

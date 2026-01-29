@@ -46,6 +46,7 @@ class PlayerState {
 // =============================================================================
 class PlayerNotifier extends StateNotifier<PlayerState> {
   final Ref _ref;
+  List<Surah>? _originalPlaylist; // Store original playlist for unshuffle
 
   PlayerNotifier(this._ref) : super(const PlayerState());
 
@@ -100,6 +101,9 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     final audioService = _ref.read(audioPlayerServiceProvider);
 
     if (newShuffle) {
+      // Save original playlist before shuffling
+      _originalPlaylist = List<Surah>.from(audioService.playlist);
+
       // Shuffle the playlist
       final playlist = List<Surah>.from(audioService.playlist);
       final currentSurah = audioService.currentSurah;
@@ -115,8 +119,11 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
 
       audioService.setPlaylist(playlist);
     } else {
-      // Restore original order - reload from repository
-      _ref.read(homeProvider.notifier).loadSurahs();
+      // Restore original playlist order
+      if (_originalPlaylist != null) {
+        audioService.setPlaylist(_originalPlaylist!);
+        _originalPlaylist = null;
+      }
     }
   }
 }

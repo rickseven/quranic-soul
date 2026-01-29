@@ -199,9 +199,12 @@ class SubscriptionService {
         if (_currentSubscription != SubscriptionType.lifetime) {
           _currentSubscription = SubscriptionType.none;
           await _saveSubscriptionStatus();
-          _proStatusController.add(isPro);
         }
       }
+
+      // Always emit current status to update UI
+      // This ensures UI refreshes even if status didn't change
+      _proStatusController.add(isPro);
 
       // Log if subscription changed (for debugging in dev)
       if (previousSubscription != _currentSubscription) {

@@ -136,7 +136,9 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
   Widget _buildHeader(BuildContext context, bool isDark) {
-    final isPro = ref.watch(subscriptionServiceProvider).isPro;
+    final isProAsync = ref.watch(isProProvider);
+    final isPro =
+        isProAsync.valueOrNull ?? ref.watch(subscriptionServiceProvider).isPro;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),

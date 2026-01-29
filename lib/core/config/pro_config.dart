@@ -10,7 +10,7 @@ class ProConfig {
   // These must match exactly with Google Play Console product IDs
   static const String monthlySubscriptionId = 'quranic_soul_pro_monthly';
   static const String annualSubscriptionId = 'quranic_soul_pro_annual';
-  static const String lifetimeSubscriptionId = 'quranic-soul-pro-lifetime';
+  static const String lifetimeSubscriptionId = 'quranic_soul_pro_lifetime';
 
   // Fallback prices (shown only when store data is unavailable)
   // Actual prices are fetched from Google Play/App Store

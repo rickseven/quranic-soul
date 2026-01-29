@@ -86,7 +86,7 @@ class _QuranicSoulAppState extends ConsumerState<QuranicSoulApp>
     await downloadService.initialize();
     await subscriptionService.initialize();
     await adService.initialize();
-    soundEffectService.initialize();
+    await soundEffectService.initialize();
   }
 
   @override

@@ -43,11 +43,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     });
   }
 
-  void _initializePlayer() {
+  void _initializePlayer() async {
     final soundEffectService = ref.read(soundEffectServiceProvider);
     final audioService = ref.read(audioPlayerServiceProvider);
 
-    soundEffectService.initialize();
+    await soundEffectService.initialize();
     audioService.setSoundEffectService(soundEffectService);
 
     _surahSubscription = audioService.currentSurahStream.listen((surah) {

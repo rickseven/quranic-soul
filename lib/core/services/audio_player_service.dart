@@ -224,8 +224,6 @@ class AudioPlayerService {
 
   void setSoundEffectService(SoundEffectService service) {
     _soundEffectService = service;
-    // Pass sound effect service to audio handler for background management
-    _audioHandler?._setSoundEffectService(service);
 
     if (!_listenerSetup) {
       _setupSoundEffectSync();
@@ -335,15 +333,9 @@ class AudioPlayerService {
 }
 
 /// Audio Handler for background playback and media notification controls
-/// Also manages sound effect players to keep them alive in background
 class _QuranicAudioHandler extends BaseAudioHandler with SeekHandler {
   final AudioPlayer _player = AudioPlayer();
   AudioPlayerService? _service;
-  SoundEffectService? _soundEffectService;
-
-  // Sound effect players managed within the audio handler for background support
-  final Map<String, AudioPlayer> _effectPlayers = {};
-  Timer? _effectHealthCheck;
 
   AudioPlayer get player => _player;
 
@@ -355,119 +347,6 @@ class _QuranicAudioHandler extends BaseAudioHandler with SeekHandler {
     _service = service;
   }
 
-  void _setSoundEffectService(SoundEffectService service) {
-    _soundEffectService = service;
-    _startEffectHealthCheck();
-  }
-
-  void _startEffectHealthCheck() {
-    _effectHealthCheck?.cancel();
-    _effectHealthCheck = Timer.periodic(const Duration(seconds: 2), (_) {
-      _ensureEffectsPlaying();
-    });
-  }
-
-  Future<void> _ensureEffectsPlaying() async {
-    if (_soundEffectService == null) return;
-    if (!_player.playing) return; // Only check if main audio is playing
-
-    for (final effect in _soundEffectService!.getAllEffects()) {
-      if (effect.shouldBePlaying) {
-        var effectPlayer = _effectPlayers[effect.id];
-
-        // Check if player needs to be created or restarted
-        if (effectPlayer == null ||
-            !effectPlayer.playing ||
-            effectPlayer.processingState == ProcessingState.completed ||
-            effectPlayer.processingState == ProcessingState.idle) {
-          await _playEffectInHandler(effect.id, effect.volume, effect.fileName);
-        }
-      }
-    }
-  }
-
-  Future<void> _playEffectInHandler(
-    String id,
-    double volume,
-    String fileName,
-  ) async {
-    try {
-      // Dispose old player if exists
-      if (_effectPlayers.containsKey(id)) {
-        try {
-          await _effectPlayers[id]?.dispose();
-        } catch (_) {}
-      }
-
-      // Create new player
-      final effectPlayer = AudioPlayer();
-      _effectPlayers[id] = effectPlayer;
-
-      final assetPath = 'assets/sounds/$fileName';
-      final audioSource = LoopingAudioSource(
-        child: AudioSource.asset(assetPath),
-        count: 99999,
-      );
-
-      await effectPlayer.setAudioSource(audioSource, preload: true);
-      await effectPlayer.setVolume(volume);
-      await effectPlayer.play();
-    } catch (_) {
-      // Silently handle errors
-    }
-  }
-
-  Future<void> _stopEffect(String id) async {
-    final effectPlayer = _effectPlayers[id];
-    if (effectPlayer != null) {
-      try {
-        await effectPlayer.stop();
-        await effectPlayer.dispose();
-      } catch (_) {}
-      _effectPlayers.remove(id);
-    }
-  }
-
-  Future<void> _pauseAllEffects() async {
-    for (final player in _effectPlayers.values) {
-      try {
-        if (player.playing) {
-          await player.pause();
-        }
-      } catch (_) {}
-    }
-  }
-
-  Future<void> _resumeAllEffects() async {
-    if (_soundEffectService == null) return;
-
-    for (final effect in _soundEffectService!.getAllEffects()) {
-      if (effect.shouldBePlaying) {
-        var effectPlayer = _effectPlayers[effect.id];
-        if (effectPlayer != null && !effectPlayer.playing) {
-          try {
-            await effectPlayer.play();
-          } catch (_) {
-            // Recreate if resume fails
-            await _playEffectInHandler(
-              effect.id,
-              effect.volume,
-              effect.fileName,
-            );
-          }
-        } else if (effectPlayer == null) {
-          await _playEffectInHandler(effect.id, effect.volume, effect.fileName);
-        }
-      }
-    }
-  }
-
-  Future<void> _stopAllEffects() async {
-    for (final id in _effectPlayers.keys.toList()) {
-      await _stopEffect(id);
-    }
-  }
-
   void _init() {
     _broadcastState();
 
@@ -476,15 +355,7 @@ class _QuranicAudioHandler extends BaseAudioHandler with SeekHandler {
       onError: (Object e, StackTrace st) {},
     );
 
-    _player.playingStream.listen((playing) {
-      _broadcastState();
-      // Sync effect players with main player state
-      if (playing) {
-        _resumeAllEffects();
-      } else {
-        _pauseAllEffects();
-      }
-    });
+    _player.playingStream.listen((_) => _broadcastState());
 
     _player.durationStream.listen((duration) {
       if (duration != null && mediaItem.value != null) {
@@ -593,7 +464,6 @@ class _QuranicAudioHandler extends BaseAudioHandler with SeekHandler {
     }
 
     await _player.play();
-    // Effects will be resumed by playingStream listener
   }
 
   Future<bool> _isAppInForeground() async {
@@ -604,13 +474,11 @@ class _QuranicAudioHandler extends BaseAudioHandler with SeekHandler {
   @override
   Future<void> pause() async {
     await _player.pause();
-    // Effects will be paused by playingStream listener
   }
 
   @override
   Future<void> stop() async {
     await _player.stop();
-    await _stopAllEffects();
     await _service?._soundEffectService?.stopAll();
     await super.stop();
   }

@@ -22,12 +22,12 @@ class _HomePageState extends ConsumerState<HomePage> {
     _initializeServices();
   }
 
-  void _initializeServices() {
+  void _initializeServices() async {
     final soundEffectService = ref.read(soundEffectServiceProvider);
     final audioService = ref.read(audioPlayerServiceProvider);
     final adService = ref.read(adServiceProvider);
 
-    soundEffectService.initialize();
+    await soundEffectService.initialize();
     audioService.setSoundEffectService(soundEffectService);
     audioService.setAdTrackingCallback(() async {
       await adService.onSurahPlayed();

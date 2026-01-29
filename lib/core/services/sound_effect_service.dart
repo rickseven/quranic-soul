@@ -391,6 +391,36 @@ class SoundEffectService {
     // Reserved for future use
   }
 
+  /// Called when app returns to foreground
+  /// Forces recreation of all sound effect players that should be playing
+  Future<void> onAppResumed() async {
+    // Don't do anything if paused or no active effects
+    if (_isPaused) return;
+
+    bool hasActiveEffects = _effects.values.any(
+      (e) => e.volume > 0 && e._shouldBePlaying,
+    );
+    if (!hasActiveEffects) return;
+
+    // Force recreate all players that should be playing
+    // This handles the case where Android killed the players while app was in background
+    final recreateFutures = <Future>[];
+    for (final effect in _effects.values) {
+      if (effect.volume > 0 && effect._shouldBePlaying) {
+        // Check if player is actually playing
+        final isActuallyPlaying = effect.player?.playing ?? false;
+        if (!isActuallyPlaying) {
+          // Player is not playing but should be - recreate it
+          recreateFutures.add(_recreatePlayer(effect));
+        }
+      }
+    }
+
+    if (recreateFutures.isNotEmpty) {
+      await Future.wait(recreateFutures);
+    }
+  }
+
   void setSleepTimer(Duration duration, VoidCallback onComplete) {
     _sleepTimer?.cancel();
 

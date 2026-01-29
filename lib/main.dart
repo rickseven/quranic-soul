@@ -101,6 +101,7 @@ class _QuranicSoulAppState extends ConsumerState<QuranicSoulApp>
 
     final audioService = ref.read(audioPlayerServiceProvider);
     final subscriptionService = ref.read(subscriptionServiceProvider);
+    final soundEffectService = ref.read(soundEffectServiceProvider);
 
     switch (state) {
       case AppLifecycleState.paused:
@@ -111,6 +112,14 @@ class _QuranicSoulAppState extends ConsumerState<QuranicSoulApp>
         break;
 
       case AppLifecycleState.resumed:
+        // When app comes back to foreground, ensure sound effects are synced
+        // with main audio player state
+        if (audioService.isPlaying) {
+          // Main audio is playing, ensure sound effects are resumed
+          soundEffectService.onAppResumed();
+        }
+        break;
+
       case AppLifecycleState.detached:
       case AppLifecycleState.hidden:
         break;

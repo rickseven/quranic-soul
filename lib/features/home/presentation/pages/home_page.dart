@@ -136,9 +136,10 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
   Widget _buildHeader(BuildContext context, bool isDark) {
-    final isProAsync = ref.watch(isProProvider);
-    final isPro =
-        isProAsync.valueOrNull ?? ref.watch(subscriptionServiceProvider).isPro;
+    // Watch the pro status listener to keep it active
+    ref.watch(proStatusListenerProvider);
+    // Get the current PRO status
+    final isPro = ref.watch(isProProvider);
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),

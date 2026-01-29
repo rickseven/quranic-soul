@@ -56,6 +56,9 @@ class HomeNotifier extends StateNotifier<HomeState> {
       // Refresh subscription status from store
       await subscriptionService.restorePurchases();
 
+      // Update the isProProvider with latest status
+      _ref.read(isProProvider.notifier).state = subscriptionService.isPro;
+
       final allSurahs = await repository.getAllSurahs();
       final recommended = await repository.getRecommendedSurahs();
 

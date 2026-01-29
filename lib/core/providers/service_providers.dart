@@ -48,13 +48,19 @@ final subscriptionServiceProvider = Provider<SubscriptionService>((ref) {
   return SubscriptionService();
 });
 
-// Reactive provider for PRO status - listens to subscription changes
-final isProProvider = StreamProvider<bool>((ref) async* {
+// Reactive provider for PRO status
+// This provider can be invalidated to force refresh
+final isProProvider = StateProvider<bool>((ref) {
   final subscriptionService = ref.watch(subscriptionServiceProvider);
-  // Emit initial value
-  yield subscriptionService.isPro;
-  // Then listen to stream for updates
+  return subscriptionService.isPro;
+});
+
+// Stream provider that listens to subscription changes and updates isProProvider
+final proStatusListenerProvider = StreamProvider<bool>((ref) async* {
+  final subscriptionService = ref.watch(subscriptionServiceProvider);
   await for (final isPro in subscriptionService.proStatusStream) {
+    // Update the state provider when stream emits
+    ref.read(isProProvider.notifier).state = isPro;
     yield isPro;
   }
 });

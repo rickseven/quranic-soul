@@ -81,7 +81,26 @@ class HomeNotifier extends StateNotifier<HomeState> {
   Future<void> toggleFavorite(int surahId) async {
     final repository = _ref.read(surahRepositoryProvider);
     await repository.toggleFavorite(surahId);
-    await loadSurahs();
+
+    // Update state directly without showing loading
+    final updatedAllSurahs = state.allSurahs.map((surah) {
+      if (surah.id == surahId) {
+        return surah.copyWith(isFavorite: !surah.isFavorite);
+      }
+      return surah;
+    }).toList();
+
+    final updatedRecommended = state.recommendedSurahs.map((surah) {
+      if (surah.id == surahId) {
+        return surah.copyWith(isFavorite: !surah.isFavorite);
+      }
+      return surah;
+    }).toList();
+
+    state = state.copyWith(
+      allSurahs: updatedAllSurahs,
+      recommendedSurahs: updatedRecommended,
+    );
 
     // Sync with library provider
     _ref.read(libraryProvider.notifier).loadData();

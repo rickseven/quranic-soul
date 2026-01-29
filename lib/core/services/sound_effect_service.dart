@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:flutter_soloud/flutter_soloud.dart';
+import 'package:just_audio/just_audio.dart';
 
 /// Sound Effect Model
 class SoundEffect {
@@ -10,8 +9,7 @@ class SoundEffect {
   final String fileName;
   final IconData icon;
   double volume;
-  AudioSource? source;
-  SoundHandle? handle;
+  AudioPlayer? player;
   bool isLoading;
   bool _shouldBePlaying = false;
 
@@ -27,8 +25,8 @@ class SoundEffect {
   bool get shouldBePlaying => _shouldBePlaying && volume > 0;
 }
 
-/// Sound Effect Service using flutter_soloud for proper audio mixing
-/// Sound effects run independently and can play alongside main audio
+/// Sound Effect Service using just_audio for each effect
+/// Each effect has its own player for independent volume control and mixing
 class SoundEffectService {
   static final SoundEffectService _instance = SoundEffectService._internal();
   factory SoundEffectService() => _instance;
@@ -41,14 +39,11 @@ class SoundEffectService {
   DateTime? _sleepTimerStartTime;
   bool _isPaused = false;
   bool _isInitialized = false;
-  bool _soloudInitialized = false;
 
   final _sleepTimerController = StreamController<Duration?>.broadcast();
 
   Stream<Map<String, double>> get volumeStream => _volumeController.stream;
   Stream<Duration?> get sleepTimerStream => _sleepTimerController.stream;
-
-  SoLoud get _soloud => SoLoud.instance;
 
   Future<void> initialize() async {
     if (_isInitialized) return;
@@ -111,23 +106,6 @@ class SoundEffectService {
     }
 
     _isInitialized = true;
-
-    // Initialize SoLoud engine
-    await _initSoLoud();
-  }
-
-  Future<void> _initSoLoud() async {
-    if (_soloudInitialized) return;
-
-    try {
-      await _soloud.init();
-      _soloudInitialized = true;
-    } catch (e) {
-      // SoLoud might already be initialized
-      if (_soloud.isInitialized) {
-        _soloudInitialized = true;
-      }
-    }
   }
 
   List<SoundEffect> getAllEffects() {
@@ -158,16 +136,11 @@ class SoundEffectService {
     if (oldVolume == 0.0 && volume > 0.0) {
       // Start playing
       await _playEffect(id, volume);
-    } else if (effect.handle != null) {
+    } else if (effect.player != null) {
       // Just update volume
-      try {
-        _soloud.setVolume(effect.handle!, volume);
-      } catch (_) {
-        // Handle might be invalid, restart
-        await _playEffect(id, volume);
-      }
+      await effect.player!.setVolume(volume);
     } else {
-      // No handle, start playing
+      // No player, start playing
       await _playEffect(id, volume);
     }
   }
@@ -179,42 +152,30 @@ class SoundEffectService {
     try {
       effect.isLoading = true;
 
-      // Stop existing playback
-      if (effect.handle != null) {
-        try {
-          await _soloud.stop(effect.handle!);
-        } catch (_) {}
-        effect.handle = null;
-      }
+      // Create player if not exists
+      if (effect.player == null) {
+        effect.player = AudioPlayer();
 
-      // Load source if not loaded
-      if (effect.source == null) {
+        // Set up looping
+        await effect.player!.setLoopMode(LoopMode.one);
+
+        // Load asset
         final assetPath = 'assets/sounds/${effect.fileName}';
-
-        // Load asset data
-        final byteData = await rootBundle.load(assetPath);
-        final buffer = byteData.buffer.asUint8List();
-
-        effect.source = await _soloud.loadMem(effect.fileName, buffer);
+        await effect.player!.setAsset(assetPath);
       }
 
       effect._shouldBePlaying = true;
 
-      if (!_isPaused && effect.source != null) {
-        // Play with looping enabled
-        effect.handle = await _soloud.play(
-          effect.source!,
-          volume: volume,
-          looping: true,
-          loopingStartAt: Duration.zero,
-        );
+      if (!_isPaused) {
+        await effect.player!.setVolume(volume);
+        await effect.player!.play();
       }
 
       effect.isLoading = false;
     } catch (e) {
       effect.isLoading = false;
-      effect.source = null;
-      effect.handle = null;
+      effect.player?.dispose();
+      effect.player = null;
     }
   }
 
@@ -224,11 +185,10 @@ class SoundEffectService {
 
     effect._shouldBePlaying = false;
 
-    if (effect.handle != null) {
-      try {
-        await _soloud.stop(effect.handle!);
-      } catch (_) {}
-      effect.handle = null;
+    if (effect.player != null) {
+      await effect.player!.stop();
+      await effect.player!.dispose();
+      effect.player = null;
     }
   }
 
@@ -257,10 +217,8 @@ class SoundEffectService {
     _isPaused = true;
 
     for (final effect in _effects.values) {
-      if (effect.handle != null) {
-        try {
-          _soloud.setPause(effect.handle!, true);
-        } catch (_) {}
+      if (effect.player != null && effect.volume > 0) {
+        await effect.player!.pause();
       }
     }
   }
@@ -274,22 +232,9 @@ class SoundEffectService {
       if (effect.volume > 0) {
         effect._shouldBePlaying = true;
 
-        if (effect.handle != null) {
-          try {
-            // Check if handle is still valid
-            final isValid = _soloud.getIsValidVoiceHandle(effect.handle!);
-            if (isValid) {
-              _soloud.setPause(effect.handle!, false);
-            } else {
-              // Handle invalid, restart
-              await _playEffect(effect.id, effect.volume);
-            }
-          } catch (_) {
-            // Restart on error
-            await _playEffect(effect.id, effect.volume);
-          }
+        if (effect.player != null) {
+          await effect.player!.play();
         } else {
-          // No handle, start playing
           await _playEffect(effect.id, effect.volume);
         }
       }
@@ -297,25 +242,26 @@ class SoundEffectService {
   }
 
   void onAppPaused() {
-    // SoLoud handles background audio automatically
+    // Don't pause - let sound effects continue in background
+    // They will play alongside main audio's foreground service
   }
 
   Future<void> onAppResumed() async {
     if (_isPaused) return;
 
-    // Check and restart any effects that should be playing
+    // Check and restart any effects that should be playing but stopped
+    // (Android might have killed them due to resource constraints)
     for (final effect in _effects.values) {
       if (effect.volume > 0 && effect._shouldBePlaying) {
-        if (effect.handle != null) {
-          try {
-            final isValid = _soloud.getIsValidVoiceHandle(effect.handle!);
-            if (!isValid) {
-              await _playEffect(effect.id, effect.volume);
-            }
-          } catch (_) {
-            await _playEffect(effect.id, effect.volume);
+        if (effect.player != null) {
+          final isPlaying = effect.player!.playing;
+          if (!isPlaying) {
+            // Player stopped unexpectedly, restart it
+            await effect.player!.seek(Duration.zero);
+            await effect.player!.play();
           }
         } else {
+          // No player exists, create and play
           await _playEffect(effect.id, effect.volume);
         }
       }
@@ -369,25 +315,17 @@ class SoundEffectService {
   Future<void> dispose() async {
     _sleepTimer?.cancel();
 
-    // Stop all effects
+    // Stop and dispose all players
     for (final effect in _effects.values) {
       effect._shouldBePlaying = false;
-      if (effect.handle != null) {
-        try {
-          await _soloud.stop(effect.handle!);
-        } catch (_) {}
-      }
-      if (effect.source != null) {
-        try {
-          await _soloud.disposeSource(effect.source!);
-        } catch (_) {}
+      if (effect.player != null) {
+        await effect.player!.dispose();
+        effect.player = null;
       }
     }
 
     _effects.clear();
     await _volumeController.close();
     await _sleepTimerController.close();
-
-    // Don't deinit SoLoud as it might be used elsewhere
   }
 }

@@ -2,7 +2,7 @@ name: quranic_soul
 description: "Quranic Soul - Soothing Quran recitations for inner peace and relaxation."
 publish_to: 'none'
 
-version: 1.0.1+10
+version: 1.0.1+11
 
 environment:
   sdk: ^3.10.4
@@ -26,9 +26,6 @@ dependencies:
   just_audio: ^0.9.46
   audio_session: ^0.1.25
   audio_service: ^0.18.18
-  
-  # Audio player for sound effects (supports mixing)
-  flutter_soloud: ^3.1.5
   
   # Firebase
   firebase_core: ^3.15.2

@@ -106,21 +106,17 @@ class _QuranicSoulAppState extends ConsumerState<QuranicSoulApp>
     switch (state) {
       case AppLifecycleState.paused:
       case AppLifecycleState.inactive:
-        // Notify sound effect service that app is going to background
-        soundEffectService.onAppPaused();
-
+        // For non-PRO users, pause main audio when app goes to background
         if (!subscriptionService.isPro && audioService.isPlaying) {
           audioService.pause();
         }
+        // Sound effects continue playing in background alongside main audio
         break;
 
       case AppLifecycleState.resumed:
-        // When app comes back to foreground, ensure sound effects are synced
-        // with main audio player state
-        if (audioService.isPlaying) {
-          // Main audio is playing, ensure sound effects are resumed
-          soundEffectService.onAppResumed();
-        }
+        // When app comes back to foreground, check if sound effects need restart
+        // (Android might have stopped them due to resource constraints)
+        soundEffectService.onAppResumed();
         break;
 
       case AppLifecycleState.detached:

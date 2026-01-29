@@ -485,22 +485,46 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   }
 
   Widget _buildBottomActions(BuildContext context, bool isDark) {
+    final soundEffectService = ref.watch(soundEffectServiceProvider);
+    final primaryColor = Theme.of(context).colorScheme.primary;
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 64, vertical: 8),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          _buildBottomButton(
-            icon: Icons.bedtime_rounded,
-            label: 'Sleep Timer',
-            isDark: isDark,
-            onTap: () => _showSleepTimerSheet(context),
+          // Sleep Timer with realtime stream
+          StreamBuilder<Duration?>(
+            stream: soundEffectService.sleepTimerStream,
+            builder: (context, snapshot) {
+              final hasSleepTimer = soundEffectService.hasSleepTimer;
+              return _buildBottomButton(
+                icon: Icons.bedtime_rounded,
+                label: 'Sleep Timer',
+                isDark: isDark,
+                isActive: hasSleepTimer,
+                activeColor: primaryColor,
+                onTap: () => _showSleepTimerSheet(context),
+              );
+            },
           ),
-          _buildBottomButton(
-            icon: Icons.graphic_eq_rounded,
-            label: 'Sound Effect',
-            isDark: isDark,
-            onTap: () => _showSoundEffectSheet(context),
+          // Sound Effect with realtime stream
+          StreamBuilder<Map<String, double>>(
+            stream: soundEffectService.volumeStream,
+            builder: (context, snapshot) {
+              // Check if any effect has volume > 0
+              final hasActiveEffect = soundEffectService.getAllEffects().any(
+                (e) => e.volume > 0,
+              );
+              return _buildBottomButton(
+                icon: Icons.graphic_eq_rounded,
+                label: 'Sound Effect',
+                isDark: isDark,
+                isActive: hasActiveEffect,
+                activeColor: primaryColor,
+                onTap: () => _showSoundEffectSheet(context),
+              );
+            },
           ),
         ],
       ),
@@ -512,18 +536,29 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     required String label,
     required bool isDark,
     required VoidCallback onTap,
+    bool isActive = false,
+    Color? activeColor,
   }) {
     return GestureDetector(
       onTap: onTap,
       child: Column(
         children: [
-          Icon(icon, size: 24, color: isDark ? Colors.white54 : Colors.black54),
+          Icon(
+            icon,
+            size: 24,
+            color: isActive
+                ? activeColor
+                : (isDark ? Colors.white54 : Colors.black54),
+          ),
           const SizedBox(height: 4),
           Text(
             label,
             style: TextStyle(
               fontSize: 11,
-              color: isDark ? Colors.white54 : Colors.black54,
+              color: isActive
+                  ? activeColor
+                  : (isDark ? Colors.white54 : Colors.black54),
+              fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
             ),
           ),
         ],
@@ -740,6 +775,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   }
 
   Widget _buildSleepTimerContent(BuildContext context, bool isDark) {
+    final soundEffectService = ref.read(soundEffectServiceProvider);
+    final hasSleepTimer = soundEffectService.hasSleepTimer;
+    final primaryColor = Theme.of(context).colorScheme.primary;
+
     final times = [
       {'label': '5 min', 'duration': const Duration(minutes: 5)},
       {'label': '10 min', 'duration': const Duration(minutes: 10)},
@@ -771,6 +810,91 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
               color: isDark ? Colors.white : Colors.black,
             ),
           ),
+
+          // Show active timer status
+          if (hasSleepTimer) ...[
+            const SizedBox(height: 16),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: primaryColor.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: primaryColor.withValues(alpha: 0.3)),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.bedtime_rounded,
+                        color: primaryColor,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Timer Active',
+                        style: TextStyle(
+                          color: primaryColor,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  _SleepTimerCountdown(
+                    soundEffectService: soundEffectService,
+                    isDark: isDark,
+                  ),
+                  const SizedBox(height: 12),
+                  GestureDetector(
+                    onTap: () {
+                      soundEffectService.cancelSleepTimer();
+                      Navigator.pop(context);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Sleep timer cancelled'),
+                          duration: Duration(seconds: 2),
+                        ),
+                      );
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 24,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.red.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: Colors.red.withValues(alpha: 0.3),
+                        ),
+                      ),
+                      child: const Text(
+                        'Cancel Timer',
+                        style: TextStyle(
+                          color: Colors.red,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              'Or set a new timer:',
+              style: TextStyle(
+                fontSize: 14,
+                color: isDark ? Colors.white54 : Colors.black54,
+              ),
+            ),
+          ],
+
           const SizedBox(height: 16),
           Wrap(
             spacing: 12,
@@ -794,6 +918,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   Widget _buildTimerChip(String label, Duration duration, bool isDark) {
     final soundEffectService = ref.read(soundEffectServiceProvider);
     final audioService = ref.read(audioPlayerServiceProvider);
+    final primaryColor = Theme.of(context).colorScheme.primary;
+
+    // Check if this duration is currently active
+    final currentDuration = soundEffectService.sleepTimerDuration;
+    final isActive =
+        currentDuration == duration && soundEffectService.hasSleepTimer;
+
     return GestureDetector(
       onTap: () {
         soundEffectService.setSleepTimer(duration, () {
@@ -818,14 +949,21 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
         decoration: BoxDecoration(
-          color: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05),
+          color: isActive
+              ? primaryColor.withValues(alpha: 0.2)
+              : (isDark
+                    ? Colors.white10
+                    : Colors.black.withValues(alpha: 0.05)),
           borderRadius: BorderRadius.circular(20),
+          border: isActive ? Border.all(color: primaryColor, width: 1.5) : null,
         ),
         child: Text(
           label,
           style: TextStyle(
-            color: isDark ? Colors.white70 : Colors.black87,
-            fontWeight: FontWeight.w500,
+            color: isActive
+                ? primaryColor
+                : (isDark ? Colors.white70 : Colors.black87),
+            fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
           ),
         ),
       ),
@@ -987,6 +1125,65 @@ https://play.google.com/store/apps/details?id=com.rickseven.quranicsoul''';
     await Share.share(
       shareText,
       subject: 'Quranic Soul - ${_currentSurah.name}',
+    );
+  }
+}
+
+/// Widget for realtime sleep timer countdown
+class _SleepTimerCountdown extends StatefulWidget {
+  final SoundEffectService soundEffectService;
+  final bool isDark;
+
+  const _SleepTimerCountdown({
+    required this.soundEffectService,
+    required this.isDark,
+  });
+
+  @override
+  State<_SleepTimerCountdown> createState() => _SleepTimerCountdownState();
+}
+
+class _SleepTimerCountdownState extends State<_SleepTimerCountdown> {
+  Timer? _updateTimer;
+  Duration? _remaining;
+
+  @override
+  void initState() {
+    super.initState();
+    _remaining = widget.soundEffectService.sleepTimerRemaining;
+    // Update every second
+    _updateTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) {
+        setState(() {
+          _remaining = widget.soundEffectService.sleepTimerRemaining;
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _updateTimer?.cancel();
+    super.dispose();
+  }
+
+  String _formatDuration(Duration duration) {
+    final minutes = duration.inMinutes;
+    final seconds = duration.inSeconds.remainder(60);
+    return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_remaining == null) return const SizedBox.shrink();
+
+    return Text(
+      _formatDuration(_remaining!),
+      style: TextStyle(
+        color: widget.isDark ? Colors.white70 : Colors.black87,
+        fontSize: 24,
+        fontWeight: FontWeight.bold,
+      ),
     );
   }
 }

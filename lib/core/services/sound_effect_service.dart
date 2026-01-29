@@ -37,10 +37,15 @@ class SoundEffectService {
   final Map<String, SoundEffect> _effects = {};
   final _volumeController = StreamController<Map<String, double>>.broadcast();
   Timer? _sleepTimer;
+  Duration? _sleepTimerDuration;
+  DateTime? _sleepTimerStartTime;
   bool _isPaused = false;
   bool _isInitialized = false;
 
+  final _sleepTimerController = StreamController<Duration?>.broadcast();
+
   Stream<Map<String, double>> get volumeStream => _volumeController.stream;
+  Stream<Duration?> get sleepTimerStream => _sleepTimerController.stream;
 
   void initialize() {
     if (_isInitialized) return;
@@ -214,6 +219,8 @@ class SoundEffectService {
   }
 
   Future<void> pauseAll() async {
+    if (_isPaused) return;
+
     bool hasPlayingEffects = false;
     for (final effect in _effects.values) {
       if (effect.player != null && effect.player!.playing) {
@@ -224,58 +231,71 @@ class SoundEffectService {
 
     if (!hasPlayingEffects) return;
 
-    if (_isPaused) return;
-
     _isPaused = true;
 
     for (final effect in _effects.values) {
       effect.cancelDebounce();
     }
 
-    for (final id in _effects.keys) {
-      final effect = _effects[id];
-      if (effect?.player != null && effect!.player!.playing) {
-        await effect.player!.pause();
+    // Pause all effects concurrently
+    final pauseFutures = <Future>[];
+    for (final effect in _effects.values) {
+      if (effect.player != null && effect.player!.playing) {
+        pauseFutures.add(effect.player!.pause());
       }
     }
+    await Future.wait(pauseFutures);
   }
 
   Future<void> resumeAll() async {
-    if (_isPaused) return;
+    // Only resume if we were paused
+    if (!_isPaused) return;
 
+    _isPaused = false;
+
+    // Resume all effects concurrently
+    final resumeFutures = <Future>[];
     for (final id in _effects.keys) {
       final effect = _effects[id];
       if (effect != null && effect.volume > 0.0) {
-        if (_isPaused) break;
-
         if (effect.player != null) {
           if (!effect.player!.playing) {
-            try {
-              await effect.player!.play();
-            } catch (_) {
-              if (!_isPaused) {
-                await _playEffect(id, effect.volume);
-              }
-            }
+            resumeFutures.add(_resumeEffect(effect));
           }
         } else {
-          if (!_isPaused) {
-            await _playEffect(id, effect.volume);
-          }
+          resumeFutures.add(_playEffect(id, effect.volume));
         }
       }
+    }
+    await Future.wait(resumeFutures);
+  }
+
+  Future<void> _resumeEffect(SoundEffect effect) async {
+    try {
+      await effect.player!.play();
+    } catch (_) {
+      // If play fails, try to recreate the player
+      await _playEffect(effect.id, effect.volume);
     }
   }
 
   Future<void> clearPauseState() async {
-    _isPaused = false;
+    // This is called before resumeAll to ensure effects can be resumed
+    // Don't clear here - let resumeAll handle it
   }
 
   void setSleepTimer(Duration duration, VoidCallback onComplete) {
     _sleepTimer?.cancel();
 
+    _sleepTimerDuration = duration;
+    _sleepTimerStartTime = DateTime.now();
+    _sleepTimerController.add(duration);
+
     _sleepTimer = Timer(duration, () async {
       await stopAll();
+      _sleepTimerDuration = null;
+      _sleepTimerStartTime = null;
+      _sleepTimerController.add(null);
       onComplete();
     });
   }
@@ -283,9 +303,23 @@ class SoundEffectService {
   void cancelSleepTimer() {
     _sleepTimer?.cancel();
     _sleepTimer = null;
+    _sleepTimerDuration = null;
+    _sleepTimerStartTime = null;
+    _sleepTimerController.add(null);
   }
 
   bool get hasSleepTimer => _sleepTimer != null && _sleepTimer!.isActive;
+
+  Duration? get sleepTimerDuration => _sleepTimerDuration;
+
+  Duration? get sleepTimerRemaining {
+    if (_sleepTimerStartTime == null || _sleepTimerDuration == null) {
+      return null;
+    }
+    final elapsed = DateTime.now().difference(_sleepTimerStartTime!);
+    final remaining = _sleepTimerDuration! - elapsed;
+    return remaining.isNegative ? Duration.zero : remaining;
+  }
 
   void _broadcastVolumes() {
     final volumes = <String, double>{};
@@ -307,5 +341,6 @@ class SoundEffectService {
     }
     _effects.clear();
     await _volumeController.close();
+    await _sleepTimerController.close();
   }
 }

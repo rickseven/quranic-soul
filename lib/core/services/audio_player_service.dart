@@ -246,9 +246,7 @@ class AudioPlayerService {
       // Track ad (fire and forget)
       _adTrackingCallback?.call();
 
-      // Resume sound effects when loading new track (clear pause state first)
-      await _soundEffectService?.clearPauseState();
-      await _soundEffectService?.resumeAll();
+      // Sound effects will be resumed automatically by playingStream listener
     } catch (e) {
       // Reset error state to prevent issues with next track
       try {
@@ -300,7 +298,6 @@ class AudioPlayerService {
         const Duration(milliseconds: 100),
         () async {
           if (playing) {
-            await _soundEffectService?.clearPauseState();
             await _soundEffectService?.resumeAll();
           } else {
             await _soundEffectService?.pauseAll();

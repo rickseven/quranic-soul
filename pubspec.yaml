@@ -2,7 +2,7 @@ name: quranic_soul
 description: "Quranic Soul - Soothing Quran recitations for inner peace and relaxation."
 publish_to: 'none'
 
-version: 1.0.1+4
+version: 1.0.1+5
 
 environment:
   sdk: ^3.10.4

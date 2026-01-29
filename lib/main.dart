@@ -106,6 +106,9 @@ class _QuranicSoulAppState extends ConsumerState<QuranicSoulApp>
     switch (state) {
       case AppLifecycleState.paused:
       case AppLifecycleState.inactive:
+        // Notify sound effect service that app is going to background
+        soundEffectService.onAppPaused();
+
         if (!subscriptionService.isPro && audioService.isPlaying) {
           audioService.pause();
         }

@@ -38,6 +38,7 @@ class SoundEffect {
 }
 
 /// Singleton Sound Effect Service
+/// Sound effects are managed by the audio handler for background playback support
 class SoundEffectService {
   static final SoundEffectService _instance = SoundEffectService._internal();
   factory SoundEffectService() => _instance;
@@ -50,7 +51,6 @@ class SoundEffectService {
   DateTime? _sleepTimerStartTime;
   bool _isPaused = false;
   bool _isInitialized = false;
-  Timer? _healthCheckTimer;
 
   final _sleepTimerController = StreamController<Duration?>.broadcast();
 
@@ -118,70 +118,6 @@ class SoundEffectService {
     }
 
     _isInitialized = true;
-    _startHealthCheck();
-  }
-
-  void _startHealthCheck() {
-    _healthCheckTimer?.cancel();
-    // Check every 1 second for more responsive recovery
-    _healthCheckTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      _ensureEffectsPlaying();
-    });
-  }
-
-  Future<void> _ensureEffectsPlaying() async {
-    if (_isPaused) return;
-
-    for (final effect in _effects.values) {
-      if (effect.shouldBePlaying && !effect.isLoading) {
-        final player = effect.player;
-        // Check if player is null, not playing, or in bad state
-        if (player == null) {
-          await _playEffect(effect.id, effect.volume);
-        } else {
-          final state = player.processingState;
-          final isPlaying = player.playing;
-
-          // Restart if completed, idle, or not playing when it should be
-          if (state == ProcessingState.completed ||
-              state == ProcessingState.idle ||
-              !isPlaying) {
-            await _restartEffect(effect);
-          }
-        }
-      }
-    }
-  }
-
-  Future<void> _restartEffect(SoundEffect effect) async {
-    if (_isPaused || !effect.shouldBePlaying) return;
-
-    try {
-      if (effect.player != null) {
-        // Try to seek to start and play
-        await effect.player!.seek(Duration.zero);
-        if (!effect.player!.playing) {
-          await effect.player!.play();
-        }
-      } else {
-        await _playEffect(effect.id, effect.volume);
-      }
-    } catch (_) {
-      // If restart fails, recreate player
-      await _recreatePlayer(effect);
-    }
-  }
-
-  Future<void> _recreatePlayer(SoundEffect effect) async {
-    effect.cancelSubscription();
-    try {
-      await effect.player?.dispose();
-    } catch (_) {}
-    effect.player = null;
-
-    if (effect.shouldBePlaying && !_isPaused) {
-      await _playEffect(effect.id, effect.volume);
-    }
   }
 
   List<SoundEffect> getAllEffects() {
@@ -197,122 +133,17 @@ class SoundEffectService {
     if (effect == null) return;
 
     volume = volume.clamp(0.0, 1.0);
-    final oldVolume = effect.volume;
     effect.volume = volume;
     effect._shouldBePlaying = volume > 0 && !_isPaused;
 
     _broadcastVolumes();
-    effect.cancelDebounce();
 
     if (volume == 0.0) {
       effect._shouldBePlaying = false;
-      await _stopEffect(id);
-      return;
     }
 
-    effect._debounceTimer = Timer(const Duration(milliseconds: 100), () async {
-      if (_isPaused) return;
-
-      if (oldVolume == 0.0 && volume > 0.0) {
-        await _playEffect(id, volume);
-      } else if (effect.player != null) {
-        await effect.player!.setVolume(volume);
-        if (!effect.player!.playing) {
-          await effect.player!.play();
-        }
-      } else {
-        await _playEffect(id, volume);
-      }
-    });
-  }
-
-  Future<void> _playEffect(String id, double volume) async {
-    final effect = _effects[id];
-    if (effect == null || _isPaused) return;
-
-    try {
-      effect.isLoading = true;
-
-      // Clean up existing player first
-      if (effect.player != null) {
-        effect.cancelSubscription();
-        try {
-          await effect.player!.dispose();
-        } catch (_) {}
-        effect.player = null;
-      }
-
-      // Create new player
-      effect.player = AudioPlayer();
-      final assetPath = 'assets/sounds/${effect.fileName}';
-
-      // Use LoopingAudioSource for more reliable looping
-      // count: 9999 effectively makes it infinite for practical purposes
-      final audioSource = LoopingAudioSource(
-        child: AudioSource.asset(assetPath),
-        count: 9999,
-      );
-
-      await effect.player!.setAudioSource(audioSource, preload: true);
-      await effect.player!.setVolume(volume);
-      effect._shouldBePlaying = true;
-
-      // Setup state listener for auto-recovery
-      effect._playerStateSubscription = effect.player!.playerStateStream.listen(
-        (state) {
-          // If player stops unexpectedly while it should be playing
-          if (effect.shouldBePlaying &&
-              !_isPaused &&
-              !effect.isLoading &&
-              (state.processingState == ProcessingState.completed ||
-                  state.processingState == ProcessingState.idle)) {
-            // Schedule restart (don't await to avoid blocking)
-            Future.delayed(const Duration(milliseconds: 100), () {
-              if (effect.shouldBePlaying && !_isPaused) {
-                _restartEffect(effect);
-              }
-            });
-          }
-        },
-        onError: (_) {
-          // On error, schedule recreation
-          if (effect.shouldBePlaying && !_isPaused) {
-            Future.delayed(const Duration(milliseconds: 500), () {
-              _recreatePlayer(effect);
-            });
-          }
-        },
-      );
-
-      if (!_isPaused) {
-        await effect.player!.play();
-      }
-
-      effect.isLoading = false;
-    } catch (_) {
-      effect.isLoading = false;
-      effect.cancelSubscription();
-      try {
-        await effect.player?.dispose();
-      } catch (_) {}
-      effect.player = null;
-    }
-  }
-
-  Future<void> _stopEffect(String id) async {
-    final effect = _effects[id];
-    if (effect == null) return;
-
-    effect._shouldBePlaying = false;
-    effect.cancelSubscription();
-
-    if (effect.player != null) {
-      try {
-        await effect.player!.stop();
-        await effect.player!.dispose();
-      } catch (_) {}
-      effect.player = null;
-    }
+    // Note: Actual playback is managed by _QuranicAudioHandler
+    // which reads shouldBePlaying state from effects
   }
 
   Future<void> stopAll() async {
@@ -324,11 +155,6 @@ class SoundEffectService {
       effect.volume = 0.0;
     }
 
-    final stopFutures = <Future>[];
-    for (final id in _effects.keys) {
-      stopFutures.add(_stopEffect(id));
-    }
-    await Future.wait(stopFutures);
     _broadcastVolumes();
   }
 
@@ -339,18 +165,7 @@ class SoundEffectService {
     if (!hasActiveEffects) return;
 
     _isPaused = true;
-
-    for (final effect in _effects.values) {
-      effect.cancelDebounce();
-    }
-
-    final pauseFutures = <Future>[];
-    for (final effect in _effects.values) {
-      if (effect.player != null && effect.player!.playing) {
-        pauseFutures.add(effect.player!.pause());
-      }
-    }
-    await Future.wait(pauseFutures);
+    // Note: Actual pause is handled by _QuranicAudioHandler
   }
 
   Future<void> resumeAll() async {
@@ -363,62 +178,15 @@ class SoundEffectService {
         effect._shouldBePlaying = true;
       }
     }
-
-    final resumeFutures = <Future>[];
-    for (final effect in _effects.values) {
-      if (effect.volume > 0.0) {
-        if (effect.player != null) {
-          resumeFutures.add(_safeResume(effect));
-        } else {
-          resumeFutures.add(_playEffect(effect.id, effect.volume));
-        }
-      }
-    }
-    await Future.wait(resumeFutures);
+    // Note: Actual resume is handled by _QuranicAudioHandler
   }
 
-  Future<void> _safeResume(SoundEffect effect) async {
-    try {
-      if (effect.player != null && !effect.player!.playing) {
-        await effect.player!.play();
-      }
-    } catch (_) {
-      await _recreatePlayer(effect);
-    }
+  void onAppPaused() {
+    // No-op: background playback is handled by audio handler
   }
 
-  Future<void> clearPauseState() async {
-    // Reserved for future use
-  }
-
-  /// Called when app returns to foreground
-  /// Forces recreation of all sound effect players that should be playing
   Future<void> onAppResumed() async {
-    // Don't do anything if paused or no active effects
-    if (_isPaused) return;
-
-    bool hasActiveEffects = _effects.values.any(
-      (e) => e.volume > 0 && e._shouldBePlaying,
-    );
-    if (!hasActiveEffects) return;
-
-    // Force recreate all players that should be playing
-    // This handles the case where Android killed the players while app was in background
-    final recreateFutures = <Future>[];
-    for (final effect in _effects.values) {
-      if (effect.volume > 0 && effect._shouldBePlaying) {
-        // Check if player is actually playing
-        final isActuallyPlaying = effect.player?.playing ?? false;
-        if (!isActuallyPlaying) {
-          // Player is not playing but should be - recreate it
-          recreateFutures.add(_recreatePlayer(effect));
-        }
-      }
-    }
-
-    if (recreateFutures.isNotEmpty) {
-      await Future.wait(recreateFutures);
-    }
+    // No-op: background playback is handled by audio handler
   }
 
   void setSleepTimer(Duration duration, VoidCallback onComplete) {
@@ -467,19 +235,12 @@ class SoundEffectService {
 
   Future<void> dispose() async {
     _sleepTimer?.cancel();
-    _healthCheckTimer?.cancel();
 
     for (final effect in _effects.values) {
       effect.cancelDebounce();
       effect.cancelSubscription();
       effect._shouldBePlaying = false;
     }
-
-    final disposeFutures = <Future>[];
-    for (final id in _effects.keys) {
-      disposeFutures.add(_stopEffect(id));
-    }
-    await Future.wait(disposeFutures);
 
     _effects.clear();
     await _volumeController.close();

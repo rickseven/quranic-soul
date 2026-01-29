@@ -8,10 +8,9 @@ import 'sound_effect_service.dart';
 import 'subscription_service.dart';
 import 'download_service.dart';
 
-// Forward declaration for ad tracking callback
 typedef AdTrackingCallback = Future<void> Function();
 
-/// Singleton Audio Player Service with Media Notification (Spotify-like)
+/// Singleton Audio Player Service with Media Notification
 class AudioPlayerService {
   static final AudioPlayerService _instance = AudioPlayerService._internal();
   factory AudioPlayerService() => _instance;
@@ -26,19 +25,14 @@ class AudioPlayerService {
 
   final _currentSurahController = StreamController<Surah?>.broadcast();
 
-  // Sound effect service integration
   SoundEffectService? _soundEffectService;
-
-  // Download service integration
   final DownloadService _downloadService = DownloadService();
 
-  // Ad tracking callback
   AdTrackingCallback? _adTrackingCallback;
   StreamSubscription<bool>? _playingStreamSubscription;
   Timer? _soundEffectSyncDebounce;
-  bool _listenerSetup = false; // Track if listener is already setup
+  bool _listenerSetup = false;
 
-  // Initialize early - call this from main.dart
   static Future<void> initializeService() async {
     if (_audioHandler != null) return;
 
@@ -50,11 +44,9 @@ class AudioPlayerService {
           androidNotificationChannelName: 'Quranic Soul',
           androidNotificationChannelDescription: 'Audio playback controls',
           androidNotificationOngoing: false,
-          // Small icon for status bar (must be monochrome)
           androidNotificationIcon: 'drawable/notification_icon',
           androidShowNotificationBadge: true,
           androidStopForegroundOnPause: false,
-          // Gold color for notification accent
           notificationColor: const Color(0xFFD4AF37),
           androidNotificationClickStartsActivity: true,
         ),
@@ -70,25 +62,18 @@ class AudioPlayerService {
     if (_isInitialized) return;
 
     try {
-      // Initialize audio session
       await _initAudioSession();
 
-      // Ensure audio handler is ready
       if (_audioHandler == null) {
         await initializeService();
         if (_audioHandler == null) return;
       }
 
-      // Set service reference in handler
       _audioHandler?._setService(this);
-
-      // Setup player listeners
       _setupPlayerListeners();
 
       _isInitialized = true;
-    } catch (_) {
-      // Silently handle initialization errors
-    }
+    } catch (_) {}
   }
 
   Future<void> _initAudioSession() async {
@@ -113,7 +98,6 @@ class AudioPlayerService {
         ),
       );
 
-      // Handle interruptions (calls, notifications)
       session.interruptionEventStream.listen((event) {
         if (event.begin) {
           switch (event.type) {
@@ -137,20 +121,16 @@ class AudioPlayerService {
         }
       });
 
-      // Handle headphones unplugged
       session.becomingNoisyEventStream.listen((_) {
         _audioHandler?.pause();
       });
-    } catch (_) {
-      // Silently handle audio session errors
-    }
+    } catch (_) {}
   }
 
   void _setupPlayerListeners() {
     final player = _audioHandler?.player;
     if (player == null) return;
 
-    // Auto-advance to next track when current finishes
     player.processingStateStream.listen((state) {
       if (state == ProcessingState.completed) {
         if (hasNext) {
@@ -162,7 +142,6 @@ class AudioPlayerService {
       }
     });
 
-    // Handle player errors
     player.playbackEventStream.listen(
       null,
       onError: (Object e, StackTrace st) {
@@ -174,13 +153,11 @@ class AudioPlayerService {
       },
     );
 
-    // Setup sound effect sync if service is already connected
     if (_soundEffectService != null) {
       _setupSoundEffectSync();
     }
   }
 
-  // Getters
   AudioPlayer? get player => _audioHandler?.player;
   Surah? get currentSurah => _currentSurah;
   List<Surah> get playlist => _playlist;
@@ -205,7 +182,6 @@ class AudioPlayerService {
   void setPlaylist(List<Surah> surahs, {bool updateCurrentIndex = true}) {
     _playlist = surahs;
 
-    // Update currentIndex to match current surah position in new playlist
     if (updateCurrentIndex && _currentSurah != null) {
       final newIndex = _playlist.indexWhere((s) => s.id == _currentSurah!.id);
       if (newIndex != -1) {
@@ -225,50 +201,37 @@ class AudioPlayerService {
     _currentSurah = surah;
     _currentSurahController.add(surah);
 
-    // Get audio source (local file if downloaded, otherwise stream)
     final audioUrl = await _downloadService.getAudioSource(surah);
 
     try {
-      // Create media item for notification
       final mediaItem = MediaItem(
         id: surah.id.toString(),
         title: surah.name,
         artist: surah.reciter,
         duration: Duration(seconds: surah.durationSeconds.round()),
-        // artUri removed - causes error with android.resource scheme
-        // Notification will use default app icon
         playable: true,
       );
 
-      // Load and play via audio handler
       await _audioHandler?.loadAndPlayUrl(mediaItem, audioUrl);
-
-      // Track ad (fire and forget)
       _adTrackingCallback?.call();
-
-      // Sound effects will be resumed automatically by playingStream listener
     } catch (e) {
-      // Reset error state to prevent issues with next track
       try {
         await _audioHandler?.player.stop();
-      } catch (_) {
-        // Ignore cleanup errors
-      }
+      } catch (_) {}
       rethrow;
     }
   }
 
-  // Sound effect service integration
   void setSoundEffectService(SoundEffectService service) {
     _soundEffectService = service;
+    // Pass sound effect service to audio handler for background management
+    _audioHandler?._setSoundEffectService(service);
 
-    // Only setup listener once
     if (!_listenerSetup) {
       _setupSoundEffectSync();
     }
   }
 
-  // Ad tracking callback integration
   void setAdTrackingCallback(AdTrackingCallback callback) {
     _adTrackingCallback = callback;
   }
@@ -277,23 +240,18 @@ class AudioPlayerService {
     final player = _audioHandler?.player;
     if (player == null || _soundEffectService == null) return;
 
-    // Prevent multiple setup
     if (_listenerSetup) return;
 
     _listenerSetup = true;
 
-    // Cancel previous subscription just in case
     _playingStreamSubscription?.cancel();
     _soundEffectSyncDebounce?.cancel();
 
-    // Sync sound effects with player state changes
     _playingStreamSubscription = player.playingStream.distinct().listen((
       playing,
     ) {
-      // Cancel previous debounce timer
       _soundEffectSyncDebounce?.cancel();
 
-      // Debounce to prevent rapid state changes
       _soundEffectSyncDebounce = Timer(
         const Duration(milliseconds: 100),
         () async {
@@ -320,13 +278,11 @@ class AudioPlayerService {
       await loadAndPlay(_playlist[0]);
     } else {
       await _audioHandler?.play();
-      // Sound effects will be resumed automatically by playingStream listener
     }
   }
 
   Future<void> pause() async {
     await _audioHandler?.pause();
-    // Sound effects will be paused automatically by playingStream listener
   }
 
   Future<void> stop() async {
@@ -334,7 +290,6 @@ class AudioPlayerService {
     _currentSurah = null;
     _currentIndex = -1;
     _currentSurahController.add(null);
-    // Stop all sound effects when main audio stops
     await _soundEffectService?.stopAll();
   }
 
@@ -380,9 +335,15 @@ class AudioPlayerService {
 }
 
 /// Audio Handler for background playback and media notification controls
+/// Also manages sound effect players to keep them alive in background
 class _QuranicAudioHandler extends BaseAudioHandler with SeekHandler {
   final AudioPlayer _player = AudioPlayer();
   AudioPlayerService? _service;
+  SoundEffectService? _soundEffectService;
+
+  // Sound effect players managed within the audio handler for background support
+  final Map<String, AudioPlayer> _effectPlayers = {};
+  Timer? _effectHealthCheck;
 
   AudioPlayer get player => _player;
 
@@ -394,22 +355,137 @@ class _QuranicAudioHandler extends BaseAudioHandler with SeekHandler {
     _service = service;
   }
 
+  void _setSoundEffectService(SoundEffectService service) {
+    _soundEffectService = service;
+    _startEffectHealthCheck();
+  }
+
+  void _startEffectHealthCheck() {
+    _effectHealthCheck?.cancel();
+    _effectHealthCheck = Timer.periodic(const Duration(seconds: 2), (_) {
+      _ensureEffectsPlaying();
+    });
+  }
+
+  Future<void> _ensureEffectsPlaying() async {
+    if (_soundEffectService == null) return;
+    if (!_player.playing) return; // Only check if main audio is playing
+
+    for (final effect in _soundEffectService!.getAllEffects()) {
+      if (effect.shouldBePlaying) {
+        var effectPlayer = _effectPlayers[effect.id];
+
+        // Check if player needs to be created or restarted
+        if (effectPlayer == null ||
+            !effectPlayer.playing ||
+            effectPlayer.processingState == ProcessingState.completed ||
+            effectPlayer.processingState == ProcessingState.idle) {
+          await _playEffectInHandler(effect.id, effect.volume, effect.fileName);
+        }
+      }
+    }
+  }
+
+  Future<void> _playEffectInHandler(
+    String id,
+    double volume,
+    String fileName,
+  ) async {
+    try {
+      // Dispose old player if exists
+      if (_effectPlayers.containsKey(id)) {
+        try {
+          await _effectPlayers[id]?.dispose();
+        } catch (_) {}
+      }
+
+      // Create new player
+      final effectPlayer = AudioPlayer();
+      _effectPlayers[id] = effectPlayer;
+
+      final assetPath = 'assets/sounds/$fileName';
+      final audioSource = LoopingAudioSource(
+        child: AudioSource.asset(assetPath),
+        count: 99999,
+      );
+
+      await effectPlayer.setAudioSource(audioSource, preload: true);
+      await effectPlayer.setVolume(volume);
+      await effectPlayer.play();
+    } catch (_) {
+      // Silently handle errors
+    }
+  }
+
+  Future<void> _stopEffect(String id) async {
+    final effectPlayer = _effectPlayers[id];
+    if (effectPlayer != null) {
+      try {
+        await effectPlayer.stop();
+        await effectPlayer.dispose();
+      } catch (_) {}
+      _effectPlayers.remove(id);
+    }
+  }
+
+  Future<void> _pauseAllEffects() async {
+    for (final player in _effectPlayers.values) {
+      try {
+        if (player.playing) {
+          await player.pause();
+        }
+      } catch (_) {}
+    }
+  }
+
+  Future<void> _resumeAllEffects() async {
+    if (_soundEffectService == null) return;
+
+    for (final effect in _soundEffectService!.getAllEffects()) {
+      if (effect.shouldBePlaying) {
+        var effectPlayer = _effectPlayers[effect.id];
+        if (effectPlayer != null && !effectPlayer.playing) {
+          try {
+            await effectPlayer.play();
+          } catch (_) {
+            // Recreate if resume fails
+            await _playEffectInHandler(
+              effect.id,
+              effect.volume,
+              effect.fileName,
+            );
+          }
+        } else if (effectPlayer == null) {
+          await _playEffectInHandler(effect.id, effect.volume, effect.fileName);
+        }
+      }
+    }
+  }
+
+  Future<void> _stopAllEffects() async {
+    for (final id in _effectPlayers.keys.toList()) {
+      await _stopEffect(id);
+    }
+  }
+
   void _init() {
-    // Broadcast initial state
     _broadcastState();
 
-    // Listen to player state changes
     _player.playbackEventStream.listen(
       (_) => _broadcastState(),
-      onError: (Object e, StackTrace st) {
-        // Silently handle playback errors
-      },
+      onError: (Object e, StackTrace st) {},
     );
 
-    // Listen to playing state
-    _player.playingStream.listen((_) => _broadcastState());
+    _player.playingStream.listen((playing) {
+      _broadcastState();
+      // Sync effect players with main player state
+      if (playing) {
+        _resumeAllEffects();
+      } else {
+        _pauseAllEffects();
+      }
+    });
 
-    // Listen to duration changes
     _player.durationStream.listen((duration) {
       if (duration != null && mediaItem.value != null) {
         mediaItem.add(mediaItem.value!.copyWith(duration: duration));
@@ -467,20 +543,14 @@ class _QuranicAudioHandler extends BaseAudioHandler with SeekHandler {
 
   Future<void> loadAndPlayUrl(MediaItem item, String url) async {
     try {
-      // Stop current playback and clear any error state
       try {
         await _player.stop();
-      } catch (_) {
-        // Ignore stop errors
-      }
+      } catch (_) {}
 
-      // Update media item for notification
       mediaItem.add(item);
 
-      // Load audio source - check if it's a local file or URL
       AudioSource audioSource;
 
-      // Check if it's a local file path (starts with / or contains :\ for Windows)
       final isLocalFile =
           url.startsWith('/') ||
           url.startsWith('file://') ||
@@ -488,15 +558,12 @@ class _QuranicAudioHandler extends BaseAudioHandler with SeekHandler {
           url.contains('Documents/surahs/');
 
       if (isLocalFile) {
-        // Local file path - remove file:// prefix if present
         final filePath = url.replaceFirst('file://', '');
         audioSource = AudioSource.file(filePath, tag: item);
       } else {
-        // Remote URL - add timeout for offline detection
         audioSource = LockCachingAudioSource(Uri.parse(url), tag: item);
       }
 
-      // Set audio source with timeout to detect offline mode faster
       await _player
           .setAudioSource(audioSource, preload: true)
           .timeout(
@@ -510,33 +577,26 @@ class _QuranicAudioHandler extends BaseAudioHandler with SeekHandler {
 
       await _player.play();
     } catch (e) {
-      // Clean up on error - stop player and clear audio source
       try {
         await _player.stop();
-      } catch (_) {
-        // Ignore cleanup errors
-      }
+      } catch (_) {}
       rethrow;
     }
   }
 
   @override
   Future<void> play() async {
-    // Check if user is PRO when app is in background
     final isPro = SubscriptionService().isPro;
     if (!isPro) {
-      // For non-PRO users, only allow play if app is in foreground
-      // This prevents playing from notification when app is minimized
       final isAppInForeground = await _isAppInForeground();
       if (!isAppInForeground) return;
     }
 
     await _player.play();
-    // Sound effects will be resumed automatically by playingStream listener
+    // Effects will be resumed by playingStream listener
   }
 
   Future<bool> _isAppInForeground() async {
-    // Use WidgetsBinding to check app lifecycle state
     final binding = WidgetsBinding.instance;
     return binding.lifecycleState == AppLifecycleState.resumed;
   }
@@ -544,13 +604,13 @@ class _QuranicAudioHandler extends BaseAudioHandler with SeekHandler {
   @override
   Future<void> pause() async {
     await _player.pause();
-    // Sound effects will be paused automatically by playingStream listener
+    // Effects will be paused by playingStream listener
   }
 
   @override
   Future<void> stop() async {
     await _player.stop();
-    // Stop sound effects when stopping from notification
+    await _stopAllEffects();
     await _service?._soundEffectService?.stopAll();
     await super.stop();
   }
@@ -562,7 +622,6 @@ class _QuranicAudioHandler extends BaseAudioHandler with SeekHandler {
 
   @override
   Future<void> skipToNext() async {
-    // Check if user is PRO when app is in background
     final isPro = SubscriptionService().isPro;
     if (!isPro) {
       final isAppInForeground = await _isAppInForeground();
@@ -573,7 +632,6 @@ class _QuranicAudioHandler extends BaseAudioHandler with SeekHandler {
 
   @override
   Future<void> skipToPrevious() async {
-    // Check if user is PRO when app is in background
     final isPro = SubscriptionService().isPro;
     if (!isPro) {
       final isAppInForeground = await _isAppInForeground();
@@ -603,7 +661,6 @@ class _QuranicAudioHandler extends BaseAudioHandler with SeekHandler {
 
   @override
   Future<void> onTaskRemoved() async {
-    // Keep playing when app is swiped away only for PRO users
     final isPro = SubscriptionService().isPro;
     if (!_player.playing || !isPro) {
       await stop();

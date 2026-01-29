@@ -178,21 +178,34 @@ class SubscriptionService {
     }
 
     try {
-      // Reset subscription status before restore
-      // The store will tell us what's actually active
+      // Reset flag before restore
       _restoredFromStore = false;
+
+      // Store previous subscription to detect changes
+      final previousSubscription = _currentSubscription;
 
       // This triggers _onPurchaseUpdate with restored purchases
       await _iap.restorePurchases();
 
-      // Wait a bit for restore to complete
-      await Future.delayed(const Duration(milliseconds: 500));
+      // Wait for restore callbacks to complete
+      // Google Play needs time to send purchase updates
+      await Future.delayed(const Duration(milliseconds: 1500));
 
-      // If no purchases were restored, clear local subscription
+      // If no active purchases were restored from store, clear subscription
+      // This handles the case when subscription is cancelled/expired
       if (!_restoredFromStore) {
-        _currentSubscription = SubscriptionType.none;
-        await _saveSubscriptionStatus();
-        _proStatusController.add(isPro);
+        // Only clear non-lifetime subscriptions
+        // Lifetime purchases should persist even if restore doesn't return them immediately
+        if (_currentSubscription != SubscriptionType.lifetime) {
+          _currentSubscription = SubscriptionType.none;
+          await _saveSubscriptionStatus();
+          _proStatusController.add(isPro);
+        }
+      }
+
+      // Log if subscription changed (for debugging in dev)
+      if (previousSubscription != _currentSubscription) {
+        // Subscription status changed after restore
       }
     } catch (_) {
       // On error, fall back to local cache

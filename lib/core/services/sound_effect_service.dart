@@ -12,6 +12,7 @@ class SoundEffect {
   AudioPlayer? player;
   bool isLoading;
   Timer? _debounceTimer;
+  bool _shouldBePlaying = false; // Track intended state
 
   SoundEffect({
     required this.id,
@@ -26,6 +27,8 @@ class SoundEffect {
     _debounceTimer?.cancel();
     _debounceTimer = null;
   }
+
+  bool get shouldBePlaying => _shouldBePlaying && volume > 0;
 }
 
 /// Singleton Sound Effect Service
@@ -41,6 +44,7 @@ class SoundEffectService {
   DateTime? _sleepTimerStartTime;
   bool _isPaused = false;
   bool _isInitialized = false;
+  Timer? _healthCheckTimer; // Periodic check to ensure effects are playing
 
   final _sleepTimerController = StreamController<Duration?>.broadcast();
 
@@ -108,6 +112,31 @@ class SoundEffectService {
     }
 
     _isInitialized = true;
+
+    // Start health check timer to ensure effects stay in sync
+    _startHealthCheck();
+  }
+
+  /// Periodic health check to ensure sound effects are playing when they should be
+  void _startHealthCheck() {
+    _healthCheckTimer?.cancel();
+    _healthCheckTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      _ensureEffectsPlaying();
+    });
+  }
+
+  /// Ensure all effects that should be playing are actually playing
+  Future<void> _ensureEffectsPlaying() async {
+    if (_isPaused) return;
+
+    for (final effect in _effects.values) {
+      if (effect.shouldBePlaying) {
+        // Effect should be playing but isn't
+        if (effect.player == null || !effect.player!.playing) {
+          await _playEffect(effect.id, effect.volume);
+        }
+      }
+    }
   }
 
   List<SoundEffect> getAllEffects() {
@@ -126,11 +155,15 @@ class SoundEffectService {
     final oldVolume = effect.volume;
     effect.volume = volume;
 
+    // Update intended playing state
+    effect._shouldBePlaying = volume > 0 && !_isPaused;
+
     _broadcastVolumes();
 
     effect.cancelDebounce();
 
     if (volume == 0.0) {
+      effect._shouldBePlaying = false;
       await _stopEffect(id);
       return;
     }
@@ -171,9 +204,21 @@ class SoundEffectService {
         );
 
         await effect.player!.setLoopMode(LoopMode.one);
+
+        // Listen for playback completion/errors to auto-restart
+        effect.player!.playerStateStream.listen((state) {
+          if (state.processingState == ProcessingState.completed ||
+              state.processingState == ProcessingState.idle) {
+            // If effect should be playing but stopped, restart it
+            if (effect.shouldBePlaying && !_isPaused) {
+              _playEffect(id, effect.volume);
+            }
+          }
+        });
       }
 
       await effect.player!.setVolume(volume);
+      effect._shouldBePlaying = true;
 
       if (_isPaused) {
         effect.isLoading = false;
@@ -187,6 +232,9 @@ class SoundEffectService {
       effect.isLoading = false;
     } catch (_) {
       effect.isLoading = false;
+      // On error, try to recreate player on next attempt
+      effect.player?.dispose();
+      effect.player = null;
     }
   }
 
@@ -194,11 +242,15 @@ class SoundEffectService {
     final effect = _effects[id];
     if (effect == null || effect.player == null) return;
 
+    effect._shouldBePlaying = false;
+
     try {
       await effect.player!.stop();
       await effect.player!.dispose();
       effect.player = null;
-    } catch (_) {}
+    } catch (_) {
+      effect.player = null;
+    }
   }
 
   Future<void> stopAll() async {
@@ -206,6 +258,7 @@ class SoundEffectService {
 
     for (final effect in _effects.values) {
       effect.cancelDebounce();
+      effect._shouldBePlaying = false;
     }
 
     for (final id in _effects.keys) {
@@ -221,15 +274,15 @@ class SoundEffectService {
   Future<void> pauseAll() async {
     if (_isPaused) return;
 
-    bool hasPlayingEffects = false;
+    bool hasActiveEffects = false;
     for (final effect in _effects.values) {
-      if (effect.player != null && effect.player!.playing) {
-        hasPlayingEffects = true;
+      if (effect.volume > 0) {
+        hasActiveEffects = true;
         break;
       }
     }
 
-    if (!hasPlayingEffects) return;
+    if (!hasActiveEffects) return;
 
     _isPaused = true;
 
@@ -252,6 +305,13 @@ class SoundEffectService {
     if (!_isPaused) return;
 
     _isPaused = false;
+
+    // Update shouldBePlaying state for all effects with volume > 0
+    for (final effect in _effects.values) {
+      if (effect.volume > 0) {
+        effect._shouldBePlaying = true;
+      }
+    }
 
     // Resume all effects concurrently
     final resumeFutures = <Future>[];
@@ -331,9 +391,11 @@ class SoundEffectService {
 
   Future<void> dispose() async {
     _sleepTimer?.cancel();
+    _healthCheckTimer?.cancel();
 
     for (final effect in _effects.values) {
       effect.cancelDebounce();
+      effect._shouldBePlaying = false;
     }
 
     for (final id in _effects.keys) {

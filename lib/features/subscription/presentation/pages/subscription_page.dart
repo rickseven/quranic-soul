@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/config/pro_config.dart';
@@ -14,12 +15,28 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
   final SubscriptionService _subscriptionService = SubscriptionService();
   late String _selectedPlan;
   bool _isLoading = false;
+  StreamSubscription<bool>? _proStatusSubscription;
 
   @override
   void initState() {
     super.initState();
     // Set selected plan based on current subscription
     _selectedPlan = _getSelectedPlanFromSubscription();
+
+    // Listen to pro status changes for real-time UI updates
+    _proStatusSubscription = _subscriptionService.proStatusStream.listen((_) {
+      if (mounted) {
+        setState(() {
+          _selectedPlan = _getSelectedPlanFromSubscription();
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _proStatusSubscription?.cancel();
+    super.dispose();
   }
 
   String _getSelectedPlanFromSubscription() {

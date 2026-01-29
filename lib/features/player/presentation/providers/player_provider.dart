@@ -94,7 +94,30 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
   }
 
   void toggleShuffle() {
-    state = state.copyWith(isShuffle: !state.isShuffle);
+    final newShuffle = !state.isShuffle;
+    state = state.copyWith(isShuffle: newShuffle);
+
+    final audioService = _ref.read(audioPlayerServiceProvider);
+
+    if (newShuffle) {
+      // Shuffle the playlist
+      final playlist = List<Surah>.from(audioService.playlist);
+      final currentSurah = audioService.currentSurah;
+
+      // Remove current surah from list, shuffle, then put current at front
+      if (currentSurah != null) {
+        playlist.removeWhere((s) => s.id == currentSurah.id);
+        playlist.shuffle();
+        playlist.insert(0, currentSurah);
+      } else {
+        playlist.shuffle();
+      }
+
+      audioService.setPlaylist(playlist);
+    } else {
+      // Restore original order - reload from repository
+      _ref.read(homeProvider.notifier).loadSurahs();
+    }
   }
 }
 

@@ -18,6 +18,7 @@ class SubscriptionService {
   List<ProductDetails> _products = [];
   SubscriptionType _currentSubscription = SubscriptionType.none;
   bool _isInitialized = false;
+  bool _restoredFromStore = false;
 
   final _proStatusController = StreamController<bool>.broadcast();
   Stream<bool> get proStatusStream => _proStatusController.stream;
@@ -38,6 +39,8 @@ class SubscriptionService {
       _isAvailable = await _iap.isAvailable();
 
       if (!_isAvailable) {
+        // If store not available, load from local cache
+        await _loadSubscriptionStatus();
         _isInitialized = true;
         return;
       }
@@ -52,7 +55,7 @@ class SubscriptionService {
       // Load products
       await _loadProducts();
 
-      // Restore previous purchases
+      // Restore previous purchases from store (this is the source of truth)
       await restorePurchases();
 
       _isInitialized = true;
@@ -75,6 +78,12 @@ class SubscriptionService {
   }
 
   void _onPurchaseUpdate(List<PurchaseDetails> purchases) {
+    // If we receive purchase updates, mark as restored from store
+    _restoredFromStore = true;
+
+    // Track if any active subscription found
+    bool hasActiveSubscription = false;
+
     for (final purchase in purchases) {
       switch (purchase.status) {
         case PurchaseStatus.pending:
@@ -83,6 +92,7 @@ class SubscriptionService {
         case PurchaseStatus.purchased:
         case PurchaseStatus.restored:
           _verifyAndDeliverPurchase(purchase);
+          hasActiveSubscription = true;
           break;
 
         case PurchaseStatus.error:
@@ -90,10 +100,14 @@ class SubscriptionService {
           break;
 
         case PurchaseStatus.canceled:
-          _handleSubscriptionExpired();
           _iap.completePurchase(purchase);
           break;
       }
+    }
+
+    // If restore completed but no active subscription found, clear local status
+    if (_restoredFromStore && !hasActiveSubscription && purchases.isNotEmpty) {
+      _handleSubscriptionExpired();
     }
   }
 
@@ -155,14 +169,35 @@ class SubscriptionService {
     }
   }
 
-  /// Restore previous purchases
+  /// Restore previous purchases from Google Play/App Store
+  /// This is the source of truth for subscription status
   Future<void> restorePurchases() async {
-    if (!_isAvailable) return;
+    if (!_isAvailable) {
+      await _loadSubscriptionStatus();
+      return;
+    }
 
     try {
-      await _loadSubscriptionStatus();
+      // Reset subscription status before restore
+      // The store will tell us what's actually active
+      _restoredFromStore = false;
+
+      // This triggers _onPurchaseUpdate with restored purchases
       await _iap.restorePurchases();
-    } catch (_) {}
+
+      // Wait a bit for restore to complete
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      // If no purchases were restored, clear local subscription
+      if (!_restoredFromStore) {
+        _currentSubscription = SubscriptionType.none;
+        await _saveSubscriptionStatus();
+        _proStatusController.add(isPro);
+      }
+    } catch (_) {
+      // On error, fall back to local cache
+      await _loadSubscriptionStatus();
+    }
   }
 
   /// Get product by ID

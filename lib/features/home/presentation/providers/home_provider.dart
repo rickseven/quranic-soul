@@ -51,6 +51,10 @@ class HomeNotifier extends StateNotifier<HomeState> {
     try {
       final repository = _ref.read(surahRepositoryProvider);
       final audioService = _ref.read(audioPlayerServiceProvider);
+      final subscriptionService = _ref.read(subscriptionServiceProvider);
+
+      // Refresh subscription status from store
+      await subscriptionService.restorePurchases();
 
       final allSurahs = await repository.getAllSurahs();
       final recommended = await repository.getRecommendedSurahs();

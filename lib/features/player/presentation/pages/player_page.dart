@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart' as ja;
+import 'package:share_plus/share_plus.dart';
 import '../../../../core/providers/service_providers.dart';
 import '../../../../core/services/sound_effect_service.dart';
 import '../../../../domain/entities/surah.dart';
@@ -332,7 +333,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                 ),
                 child: Slider(
                   value: progress.clamp(0.0, 1.0),
-                  onChanged: (value) => audioService.seek(
+                  onChanged:
+                      (_) {}, // Required but we use onChangeEnd for actual seek
+                  onChangeEnd: (value) => audioService.seek(
                     Duration(
                       milliseconds: (value * duration.inMilliseconds).round(),
                     ),
@@ -574,9 +577,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
             Icons.share_rounded,
             'Share',
             isDark,
-            () => ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Share feature coming soon')),
-            ),
+            () => _shareSurah(),
           ),
           _buildOptionItem(
             isDownloaded ? Icons.delete_rounded : Icons.download_rounded,
@@ -971,6 +972,21 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           ),
         ],
       ),
+    );
+  }
+
+  Future<void> _shareSurah() async {
+    final shareText =
+        '''🎧 Listening to ${_currentSurah.name}
+
+Recited by ${_currentSurah.reciter}
+
+Download Quranic Soul app for soothing Quran recitations:
+https://play.google.com/store/apps/details?id=com.rickseven.quranicsoul''';
+
+    await Share.share(
+      shareText,
+      subject: 'Quranic Soul - ${_currentSurah.name}',
     );
   }
 }

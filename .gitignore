@@ -21,10 +21,9 @@ migrate_working_dir/
 key.properties
 android/key.properties
 
-# Firebase config files (optional - can be committed for team projects)
-# Uncomment if you want to keep these private
-# android/app/google-services.json
-# ios/Runner/GoogleService-Info.plist
+# Firebase config files (contains API keys - should not be in public repos)
+android/app/google-services.json
+ios/Runner/GoogleService-Info.plist
 
 # IntelliJ related
 *.iml

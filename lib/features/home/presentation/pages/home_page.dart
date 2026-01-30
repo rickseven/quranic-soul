@@ -173,7 +173,8 @@ class _HomePageState extends ConsumerState<HomePage> {
     return Scaffold(
       body: SafeArea(
         child: RefreshIndicator(
-          onRefresh: () => ref.read(homeProvider.notifier).loadSurahs(),
+          onRefresh: () =>
+              ref.read(homeProvider.notifier).loadSurahs(showLoading: false),
           child: CustomScrollView(
             slivers: [
               SliverToBoxAdapter(child: _buildHeader(context, isDark)),

@@ -45,20 +45,14 @@ class HomeNotifier extends StateNotifier<HomeState> {
     loadSurahs();
   }
 
-  Future<void> loadSurahs() async {
-    state = state.copyWith(isLoading: true, error: null);
+  Future<void> loadSurahs({bool showLoading = true}) async {
+    if (showLoading) {
+      state = state.copyWith(isLoading: true, error: null);
+    }
 
     try {
       final repository = _ref.read(surahRepositoryProvider);
       final audioService = _ref.read(audioPlayerServiceProvider);
-      final subscriptionService = _ref.read(subscriptionServiceProvider);
-
-      // Refresh subscription status from store (this will wait for Google Play response)
-      await subscriptionService.restorePurchases();
-
-      // Update the isProProvider with latest status after restore completes
-      final currentProStatus = subscriptionService.isPro;
-      _ref.read(isProProvider.notifier).state = currentProStatus;
 
       final allSurahs = await repository.getAllSurahs();
       final recommended = await repository.getRecommendedSurahs();

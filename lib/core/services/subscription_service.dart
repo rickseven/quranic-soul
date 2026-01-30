@@ -78,11 +78,11 @@ class SubscriptionService {
   }
 
   void _onPurchaseUpdate(List<PurchaseDetails> purchases) {
-    // If we receive purchase updates, mark as restored from store
-    _restoredFromStore = true;
-
-    // Track if any active subscription found
-    bool hasActiveSubscription = false;
+    // If we receive any purchase updates (even empty), mark as restored
+    if (purchases.isEmpty) {
+      // Empty list means no active subscriptions
+      return;
+    }
 
     for (final purchase in purchases) {
       switch (purchase.status) {
@@ -91,8 +91,9 @@ class SubscriptionService {
 
         case PurchaseStatus.purchased:
         case PurchaseStatus.restored:
+          // Mark as restored from store - we have valid purchase
+          _restoredFromStore = true;
           _verifyAndDeliverPurchase(purchase);
-          hasActiveSubscription = true;
           break;
 
         case PurchaseStatus.error:
@@ -103,20 +104,6 @@ class SubscriptionService {
           _iap.completePurchase(purchase);
           break;
       }
-    }
-
-    // If restore completed but no active subscription found, clear local status
-    if (_restoredFromStore && !hasActiveSubscription && purchases.isNotEmpty) {
-      _handleSubscriptionExpired();
-    }
-  }
-
-  /// Handle subscription expiry/cancellation
-  void _handleSubscriptionExpired() {
-    if (_currentSubscription != SubscriptionType.lifetime) {
-      _currentSubscription = SubscriptionType.none;
-      _saveSubscriptionStatus();
-      _proStatusController.add(isPro);
     }
   }
 
@@ -181,35 +168,30 @@ class SubscriptionService {
       // Reset flag before restore
       _restoredFromStore = false;
 
-      // Store previous subscription to detect changes
-      final previousSubscription = _currentSubscription;
+      // Temporarily clear subscription - will be restored if valid purchase exists
+      // Don't clear lifetime as it's a one-time purchase
+      final wasLifetime = _currentSubscription == SubscriptionType.lifetime;
+      if (!wasLifetime) {
+        _currentSubscription = SubscriptionType.none;
+      }
 
       // This triggers _onPurchaseUpdate with restored purchases
       await _iap.restorePurchases();
 
       // Wait for restore callbacks to complete
       // Google Play needs time to send purchase updates
-      await Future.delayed(const Duration(milliseconds: 1500));
+      await Future.delayed(const Duration(milliseconds: 2000));
 
-      // If no active purchases were restored from store, clear subscription
-      // This handles the case when subscription is cancelled/expired
-      if (!_restoredFromStore) {
-        // Only clear non-lifetime subscriptions
-        // Lifetime purchases should persist even if restore doesn't return them immediately
-        if (_currentSubscription != SubscriptionType.lifetime) {
-          _currentSubscription = SubscriptionType.none;
-          await _saveSubscriptionStatus();
-        }
+      // After waiting, if _restoredFromStore is still false and we had a subscription,
+      // it means the subscription is no longer valid
+      if (!_restoredFromStore && !wasLifetime) {
+        // No active subscription found from store
+        _currentSubscription = SubscriptionType.none;
+        await _saveSubscriptionStatus();
       }
 
       // Always emit current status to update UI
-      // This ensures UI refreshes even if status didn't change
       _proStatusController.add(isPro);
-
-      // Log if subscription changed (for debugging in dev)
-      if (previousSubscription != _currentSubscription) {
-        // Subscription status changed after restore
-      }
     } catch (_) {
       // On error, fall back to local cache
       await _loadSubscriptionStatus();

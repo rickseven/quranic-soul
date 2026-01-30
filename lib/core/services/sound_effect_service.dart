@@ -216,11 +216,14 @@ class SoundEffectService {
 
     _isPaused = true;
 
+    // Pause all effects in parallel
+    final pauseFutures = <Future>[];
     for (final effect in _effects.values) {
       if (effect.player != null && effect.volume > 0) {
-        await effect.player!.pause();
+        pauseFutures.add(effect.player!.pause());
       }
     }
+    await Future.wait(pauseFutures);
   }
 
   Future<void> resumeAll() async {
@@ -228,17 +231,25 @@ class SoundEffectService {
 
     _isPaused = false;
 
+    // Collect all effects that need to be resumed
+    final resumeFutures = <Future>[];
+
     for (final effect in _effects.values) {
       if (effect.volume > 0) {
         effect._shouldBePlaying = true;
 
         if (effect.player != null) {
-          await effect.player!.play();
+          // Player exists, just play it
+          resumeFutures.add(effect.player!.play());
         } else {
-          await _playEffect(effect.id, effect.volume);
+          // No player, need to create and play
+          resumeFutures.add(_playEffect(effect.id, effect.volume));
         }
       }
     }
+
+    // Wait for all to resume
+    await Future.wait(resumeFutures);
   }
 
   void onAppPaused() {
@@ -251,21 +262,28 @@ class SoundEffectService {
 
     // Check and restart any effects that should be playing but stopped
     // (Android might have killed them due to resource constraints)
+    final resumeFutures = <Future>[];
+
     for (final effect in _effects.values) {
       if (effect.volume > 0 && effect._shouldBePlaying) {
         if (effect.player != null) {
           final isPlaying = effect.player!.playing;
           if (!isPlaying) {
             // Player stopped unexpectedly, restart it
-            await effect.player!.seek(Duration.zero);
-            await effect.player!.play();
+            resumeFutures.add(
+              effect.player!
+                  .seek(Duration.zero)
+                  .then((_) => effect.player!.play()),
+            );
           }
         } else {
           // No player exists, create and play
-          await _playEffect(effect.id, effect.volume);
+          resumeFutures.add(_playEffect(effect.id, effect.volume));
         }
       }
     }
+
+    await Future.wait(resumeFutures);
   }
 
   void setSleepTimer(Duration duration, VoidCallback onComplete) {

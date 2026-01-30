@@ -23,15 +23,11 @@ class _HomePageState extends ConsumerState<HomePage> {
   void initState() {
     super.initState();
     _initializeServices();
-
-    // Show premium popup only once per app session
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _showPremiumPopupIfNeeded();
-    });
   }
 
   void _showPremiumPopupIfNeeded() {
     if (_hasShownPremiumPopup) return;
+    if (!mounted) return;
 
     final isPro = ref.read(isProProvider);
     if (!isPro) {
@@ -169,6 +165,11 @@ class _HomePageState extends ConsumerState<HomePage> {
     if (homeState.error != null) {
       return _buildErrorState(homeState.error!, isDark);
     }
+
+    // Show premium popup after data is loaded (subscription status is ready)
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _showPremiumPopupIfNeeded();
+    });
 
     return Scaffold(
       body: SafeArea(

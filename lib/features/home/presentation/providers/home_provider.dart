@@ -53,11 +53,12 @@ class HomeNotifier extends StateNotifier<HomeState> {
       final audioService = _ref.read(audioPlayerServiceProvider);
       final subscriptionService = _ref.read(subscriptionServiceProvider);
 
-      // Refresh subscription status from store
+      // Refresh subscription status from store (this will wait for Google Play response)
       await subscriptionService.restorePurchases();
 
-      // Update the isProProvider with latest status
-      _ref.read(isProProvider.notifier).state = subscriptionService.isPro;
+      // Update the isProProvider with latest status after restore completes
+      final currentProStatus = subscriptionService.isPro;
+      _ref.read(isProProvider.notifier).state = currentProStatus;
 
       final allSurahs = await repository.getAllSurahs();
       final recommended = await repository.getRecommendedSurahs();

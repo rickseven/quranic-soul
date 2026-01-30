@@ -18,7 +18,9 @@ class SubscriptionService {
   List<ProductDetails> _products = [];
   SubscriptionType _currentSubscription = SubscriptionType.none;
   bool _isInitialized = false;
-  bool _restoredFromStore = false;
+
+  // Completer for restore purchases
+  Completer<void>? _restoreCompleter;
 
   final _proStatusController = StreamController<bool>.broadcast();
   Stream<bool> get proStatusStream => _proStatusController.stream;
@@ -78,11 +80,7 @@ class SubscriptionService {
   }
 
   void _onPurchaseUpdate(List<PurchaseDetails> purchases) {
-    // If we receive any purchase updates (even empty), mark as restored
-    if (purchases.isEmpty) {
-      // Empty list means no active subscriptions
-      return;
-    }
+    bool hasValidPurchase = false;
 
     for (final purchase in purchases) {
       switch (purchase.status) {
@@ -91,8 +89,7 @@ class SubscriptionService {
 
         case PurchaseStatus.purchased:
         case PurchaseStatus.restored:
-          // Mark as restored from store - we have valid purchase
-          _restoredFromStore = true;
+          hasValidPurchase = true;
           _verifyAndDeliverPurchase(purchase);
           break;
 
@@ -104,6 +101,14 @@ class SubscriptionService {
           _iap.completePurchase(purchase);
           break;
       }
+    }
+
+    // Complete the restore if we're waiting for it
+    if (_restoreCompleter != null && !_restoreCompleter!.isCompleted) {
+      if (hasValidPurchase) {
+        _restoreCompleter!.complete();
+      }
+      // Don't complete here if no valid purchase - let timeout handle it
     }
   }
 
@@ -158,6 +163,8 @@ class SubscriptionService {
 
   /// Restore previous purchases from Google Play/App Store
   /// This is the source of truth for subscription status
+  /// Note: On Android, restorePurchases() may not send callbacks on subsequent calls
+  /// within the same session if no new purchases exist
   Future<void> restorePurchases() async {
     if (!_isAvailable) {
       await _loadSubscriptionStatus();
@@ -165,28 +172,34 @@ class SubscriptionService {
     }
 
     try {
-      // Reset flag before restore
-      _restoredFromStore = false;
-
-      // Temporarily clear subscription - will be restored if valid purchase exists
-      // Don't clear lifetime as it's a one-time purchase
+      // Remember current state
       final wasLifetime = _currentSubscription == SubscriptionType.lifetime;
+      final previousSubscription = _currentSubscription;
+
+      // Create completer to wait for restore callback
+      _restoreCompleter = Completer<void>();
+
+      // Clear subscription first (except lifetime)
+      // This ensures if no callback comes, we stay at none
       if (!wasLifetime) {
         _currentSubscription = SubscriptionType.none;
       }
 
-      // This triggers _onPurchaseUpdate with restored purchases
+      // Trigger restore - this will call _onPurchaseUpdate if there are purchases
       await _iap.restorePurchases();
 
-      // Wait for restore callbacks to complete
-      // Google Play needs time to send purchase updates
-      await Future.delayed(const Duration(milliseconds: 2000));
+      // Wait for callback with timeout
+      // If no active subscription, callback won't be called, so we timeout
+      try {
+        await _restoreCompleter!.future.timeout(const Duration(seconds: 3));
+        // Callback received - subscription was restored in _onPurchaseUpdate
+      } catch (_) {
+        // Timeout - no active subscription found
+        // _currentSubscription is already set to none above
+      }
 
-      // After waiting, if _restoredFromStore is still false and we had a subscription,
-      // it means the subscription is no longer valid
-      if (!_restoredFromStore && !wasLifetime) {
-        // No active subscription found from store
-        _currentSubscription = SubscriptionType.none;
+      // Save if changed
+      if (_currentSubscription != previousSubscription) {
         await _saveSubscriptionStatus();
       }
 
@@ -195,6 +208,8 @@ class SubscriptionService {
     } catch (_) {
       // On error, fall back to local cache
       await _loadSubscriptionStatus();
+    } finally {
+      _restoreCompleter = null;
     }
   }
 
